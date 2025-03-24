@@ -2,7 +2,7 @@ import cv2
 from tkinter import *
 from PIL import Image, ImageTk
 import numpy as np
-from tensorflow.keras.models import load_model # type: ignore
+from tensorflow.keras.models import load_model  # type: ignore
 import mediapipe as mp
 
 # Załaduj model
@@ -16,6 +16,13 @@ classes = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N',
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(static_image_mode=False, max_num_hands=1, min_detection_confidence=0.5)
 mp_drawing = mp.solutions.drawing_utils
+
+# Zmienna przechowująca aktualnie zbudowane słowo
+current_text = ""
+
+# Licznik klatek do ograniczenia częstotliwości przewidywań
+frame_counter = 0
+predict_every_n_frames = 30  # Przewiduj co 15 klatek
 
 # Funkcja do przetwarzania klatek
 def process_frame(frame):
@@ -34,51 +41,55 @@ def extract_keypoints(results):
         landmarks = results.multi_hand_landmarks[0]
         keypoints = []
         for lm in landmarks.landmark:
-            keypoints.extend([lm.x, lm.y, lm.z])  # Dodaj współrzędne x, y, z
+            keypoints.extend([lm.x, lm.y, lm.z])
         return np.array(keypoints).reshape(1, -1)
     return None
 
 # Funkcja do przewidywania klasy
 def predict_class(keypoints):
     predictions = model.predict(keypoints, verbose=0)
+    confidence = np.max(predictions)
     predicted_label = classes[np.argmax(predictions)]
-    if np.max(predictions) < 0.9:
-        predicted_label = "Nie wykryto litery."
+    if confidence < 0.8:
+        return None
     return predicted_label
 
-# Funkcja do aktualizacji obrazu w czasie rzeczywistym
+# Aktualizacja klatki i przewidywanie litery
 def update_frame():
-    global current_frame
+    global current_text, frame_counter
+
     ret, frame = cap.read()
     if ret:
-        frame = cv2.flip(frame, 1)  # Odbicie lustrzane
-        frame, results = process_frame(frame)  # Przetwarzanie klatki
-        current_frame = (frame, results)
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame = cv2.flip(frame, 1)
+        frame_with_landmarks, results = process_frame(frame)
+
+        frame_counter += 1
+        if frame_counter >= predict_every_n_frames:
+            frame_counter = 0
+            keypoints = extract_keypoints(results)
+            if keypoints is not None:
+                predicted_label = predict_class(keypoints)
+                if predicted_label:
+                    if predicted_label == 'space':
+                        current_text += ' '
+                    elif predicted_label == 'del':
+                        current_text = current_text[:-1]
+                    else:
+                        current_text += predicted_label
+                    lbl_result.config(text=f"Wykryty tekst: {current_text}")
+
+        frame_rgb = cv2.cvtColor(frame_with_landmarks, cv2.COLOR_BGR2RGB)
         img = ImageTk.PhotoImage(Image.fromarray(frame_rgb))
         lbl_video.imgtk = img
         lbl_video.configure(image=img)
-        lbl_video.after(10, update_frame)
 
-# Funkcja do przechwytywania obrazu i przewidywania klasy
-def capture_and_predict():
-    global current_frame
-    frame, results = current_frame
-    keypoints = extract_keypoints(results)
-    if keypoints is not None:
-        # Przewidywanie klasy
-        predicted_label = predict_class(keypoints)
+    lbl_video.after(10, update_frame)
 
-        # Wyświetlenie wyciętej dłoni
-        lbl_result.config(text=f"Przewidywana litera: {predicted_label}")
-
-        # Wyświetlenie przechwyconej dłoni
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        img = ImageTk.PhotoImage(Image.fromarray(frame_rgb))
-        lbl_hand.imgtk = img
-        lbl_hand.configure(image=img)
-    else:
-        lbl_result.config(text="Nie wykryto dłoni.")
+# Resetowanie tekstu
+def reset_text():
+    global current_text
+    current_text = ""
+    lbl_result.config(text="Wykryty tekst: ")
 
 # Konfiguracja GUI
 root = Tk()
@@ -88,21 +99,16 @@ root.title("ASL Model")
 lbl_video = Label(root)
 lbl_video.pack()
 
-# Przycisk do przechwytywania obrazu
-btn_capture = Button(root, text="Zrób zdjęcie", command=capture_and_predict)
-btn_capture.pack()
+# Etykieta wynikowego tekstu
+lbl_result = Label(root, text="Wykryty tekst: ", font=("Helvetica", 16))
+lbl_result.pack(pady=10)
 
-# Etykieta wyników
-lbl_result = Label(root, text="Przewidywana litera: ---")
-lbl_result.pack()
-
-# Obraz przechwyconej dłoni
-lbl_hand = Label(root)
-lbl_hand.pack()
+# Przycisk resetujący tekst
+btn_reset = Button(root, text="Resetuj tekst", command=reset_text)
+btn_reset.pack(pady=5)
 
 # Konfiguracja kamery
 cap = cv2.VideoCapture(0)
-current_frame = None
 update_frame()
 
 # Uruchomienie aplikacji
