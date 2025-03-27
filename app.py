@@ -22,7 +22,7 @@ current_text = ""
 
 # Licznik klatek do ograniczenia częstotliwości przewidywań
 frame_counter = 0
-predict_every_n_frames = 30  # Przewiduj co 15 klatek
+predict_every_n_frames = 30
 
 # Funkcja do przetwarzania klatek
 def process_frame(frame):
